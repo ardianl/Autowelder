@@ -93,7 +93,7 @@ class Instance: #Creates pyGUI window for each camera instance
     def loop(self):
         self.cycle = timer() - self.start; self.start = timer();
         self.event, self.values = self.window.read(timeout=20)
-        if self.event == sg.WIN_CLOSED           : os._exit(0)
+        if self.event == sg.WIN_CLOSED           : return False#os._exit(0)
         if self.event == 'Select Front Edge'     : self.image.overlay *= False; cv2.putText(self.image.overlay,'Click and drag to draw box, place center of cross at center of front edge',(150,self.image.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1); self.config.update(dict(zip(['sq_x1','sq_x2','sq_y1','sq_y2'],self.image.select_region(self.window.CurrentLocation()))))
         if self.event == 'Select Fixture'        : self.image.overlay *= False; cv2.putText(self.image.overlay,'Click and drag to draw box around Fixture Square',(150,self.image.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1); self.config.update(dict(zip(['f_x1','f_x2','f_y1','f_y2'],self.image.select_region(self.window.CurrentLocation()))))
         if self.event == 'Save and Exit'         : self.save_and_exit({'LOCATION':self.window.CurrentLocation()})#Saves all settings to file
@@ -128,6 +128,7 @@ class Instance: #Creates pyGUI window for each camera instance
         self.config['Output'] = (self.values['SQUARE HSV']*'SQUARE HSV'+self.values['GAP HSV']*'GAP HSV'+self.values['Overlay']*'Overlay'+self.values['bitwise']*'bitwise')
         self.image.overlay *= not self.values['HIDE ALL']
         self.window['IMG'].update(data=self.image.output(self.values['RESIZE'],self.config['Output']))
+        return True
 ####################################################################################################################################################################################
 
     def save_and_exit(self, location):
@@ -368,13 +369,20 @@ def cam_setup(settings, cam, welder):
     return v
     
 def main():
+    loop = True
     settings = startup()
     #print(settings)
     win = Instance(settings)
     win.cam = Camera(settings['CAM ID'],int(settings['Gain']),int(settings['Exposure']),int(settings['FPS']))
         
-    while True:
-        win.loop()        
+    while loop:
+        loop = win.loop()        
 
 if __name__ == '__main__':
+    import cProfile, pstats
+    profiler = cProfile.Profile()
+    profiler.enable()
     main()
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('tottime')
+    #stats.print_stats()
