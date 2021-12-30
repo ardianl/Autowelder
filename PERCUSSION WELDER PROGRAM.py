@@ -59,25 +59,21 @@ def line_intersection(line1, line2):#Returns the intersection of two lines
 
 with Camera() as cam:
     cam = Camera()
-    print(cam.ExposureAuto.GetAccessMode())
-    print(cam.Exposure.GetAccessMode())
     cam.PixelFormat = "BayerRG8"
-    cam.AcquisitionFrameRateAuto = 'Off'
     cam.AcquisitionFrameRateEnable = True
     cam.AcquisitionFrameRate = 3
-    cam.GainAuto = 'Off'
-    cam.Gain = 20
-    cam.ExposureAuto = 'Off'
+    cam.GainAuto = 'Off'#     AAAA
+    cam.ExposureAuto = 'Off'# AAAA
     print(cam.ExposureAuto)
-    cam.ExposureTime = 68000
+    cam.ExposureTime = 69000
     print(cam.ExposureTime)
     #cam.Gamma = 0.8
     cam.GammaEnable = False
-    #cam.init()
+    cam.init()
     cam.start()
     #sg.theme("Dark Blue 3")
 #while True:
-    sg.theme("DarkTeal")
+    sg.theme("Reds")
 # Define the window layout-----------------------------------------------------------------------------------------------    
     tab2_layout =  [
         [sg.Text('These are the settings used for weld detection, do not touch anything')],        
@@ -108,7 +104,7 @@ with Camera() as cam:
         [sg.CBox('Show Found Circles',key="-ALL CIRCLES-",default=False)],
         [sg.CBox('Show Boxes',      key="-SHOW BOXES-", default=True)],
         [sg.CBox('Show Edges',         key="-SHOW MORE-",  default=True)],
-        [sg.CBox('Show Weld Judgement',         key="-Weld Status-",  default=False)],
+        [sg.CBox('Show Weld Judgement',         key="-Weld Status-",  default=True)],
         [sg.CBox('Show Weld Reset Center',         key="-RCenter-",  default=True)],
         ], title='Options', relief=sg.RELIEF_SUNKEN)],
         [sg.Text('X-Shift'),sg.Slider((1, 100),50,1,orientation="h",size=(40, 15),key="-X Shift-",),],
@@ -122,7 +118,7 @@ with Camera() as cam:
         #[sg.Text('V/N'),sg.Slider((100, 500),200,1,orientation="h",size=(20, 15),key="-V VICTOR-",),sg.Slider((100, 500),200,1,orientation="h",size=(20, 15),key="-V NORMAL-")],
     ]    
     col = [
-        [sg.Text('Resize Window:'),sg.Slider((1, 100),50,1,orientation="h",size=(40, 15),key="-RESIZE SLIDER-",),],
+        [sg.Text('Resize Window:'),sg.Slider((1, 100),80,1,orientation="h",size=(40, 15),key="-RESIZE SLIDER-",),],
         [sg.Button('Select Weld'),sg.Button('Select Horizontal Edge'),sg.Button('Select Vertical Edge')],
         [sg.Button('Save and Exit'),sg.Button('Exit without saving')],
         [sg.Button('Capture Image'),sg.Button('Plus'),sg.Button('Reset Weld')],
@@ -138,8 +134,7 @@ with Camera() as cam:
 #-------------------------------------------------------------------------------------------------------------------------
     
 #Start of Loop Here~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    while True:
-        start_time = time.time()
+    while True:    
         event, values = window.read(timeout=20)
         values["-minLineLength-"],values["-maxLineGap-"] = 50,15#Explicitly defined in case needed later
         if event == "Exit without saving" or sg.WIN_CLOSED:#Shutdown program if window is closed or exit without saving
@@ -184,7 +179,7 @@ with Camera() as cam:
                 if values["-ALL CIRCLES-"]:
                         for i in circles[0,:]: cv2.circle(frame_down[ry1:ry2,rx1:rx2,:],(int(i[0]),int(i[1])),int(i[2]),(255,255,255),5)              
                 weld = np.around(np.average(circles, axis=1)).flatten().astype(int)
-                if len(weld_list) > 15: weld_list.pop()
+                if len(weld_list) > 3: weld_list.pop()
                 weld_list.insert(0,weld)
                 if weld_list:
                     weld_centroid = np.average(weld_list,axis=0).astype(int)
@@ -247,9 +242,9 @@ with Camera() as cam:
                 try:
                     delta = math.sqrt((w_center[0]-weld_centroid[0]-rx1)**2 + (w_center[1]-weld_centroid[1]-ry1)**2)
                     if delta < values["-WELD R MIN-"]:
-                        cv2.putText(frame_down,'Check Weld',(5,45),cv2.FONT_HERSHEY_DUPLEX,3,(0,255,255),2)
+                        cv2.putText(frame_down,'Weld is Good',(5,90),cv2.FONT_HERSHEY_DUPLEX,2,(0,255,0),2)
                     else:
-                        cv2.putText(frame_down,'Check Weld',(5,45),cv2.FONT_HERSHEY_DUPLEX,3,(0,255,255),2)
+                        cv2.putText(frame_down,'Check Weld',(5,90),cv2.FONT_HERSHEY_DUPLEX,2,(0,255,255),2)
                 except:
                     None
 #______________________________________________________________________________________________________________________________
@@ -294,7 +289,7 @@ with Camera() as cam:
             #cv2.putText(frame_down,'Reading unstable..',(5,60),cv2.FONT_HERSHEY_SIMPLEX,1,(60,60,255),2)
         if outcrement < 30:
             cv2.putText(frame_down,str(file_name+imwrite_result),(5,30),cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)#file_name+imwrite_result
-        print(1/(time.time()-start_time), end='\n')
+        
         if event == 'Reset Weld':
             increment = 0
             cv2.putText(frame_down,'Click on the Weld Center, press spacebar to confirm',(200,30),cv2.FONT_HERSHEY_SIMPLEX,1,(100,255,100),2)
@@ -359,7 +354,6 @@ with Camera() as cam:
             frame = frame_blur
         elif values["-HSV-"]:           
             frame = frame_threshold
-
         elif values["-HWELD-"]:           
             frame = frame_threshold
 
