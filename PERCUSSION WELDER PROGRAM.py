@@ -2,6 +2,7 @@ import PySimpleGUI as sg
 import math
 import base64
 import pickle
+import PySpin
 from simple_pyspin import Camera
 import math
 import sys
@@ -16,8 +17,8 @@ initialized_vars = pickle.load(open('GUIsave.txt.','rb'))
 print(initialized_vars)
 globals().update(initialized_vars)
 
-#low_H = 0;         high_H = 180 #
-#low_S = 66;         high_S = 255 # PRESET VALUES WHICH ARE KNOWN TO PRODUCE GOOD RESULTS
+low_H = 6;         high_H = 26 #
+low_S = 0;         high_S = 255 # PRESET VALUES WHICH ARE KNOWN TO PRODUCE GOOD RESULTS
 #low_V = 0;         high_V = 255 #
 
 
@@ -59,12 +60,13 @@ def line_intersection(line1, line2):#Returns the intersection of two lines
 with Camera() as cam:
     cam = Camera()
     cam.PixelFormat = "BayerRG8"
-    cam.AcquisitionFrameRateEnable = False
-    #cam.AcquisitionFrameRate = 5
+    cam.AcquisitionFrameRateEnable = True
+    cam.AcquisitionFrameRate = 10
     cam.GainAuto = 'Continuous'
     cam.ExposureAuto = 'Continuous'
     #cam.Gamma = 0.8
     cam.GammaEnable = False
+    cam.init()
     cam.start()
     #sg.theme("Dark Blue 3")
 #while True:
