@@ -1,3 +1,5 @@
+This repository was created due to the lack of documentation/samples for python Spinnaker package PySpin. The programs might not be useful as is, but are uploaded to share with others who are trying to connect to FLIR cameras using PySpin. The simple_pyspin package is an alternative, but due to the need for advanced camera settings it was not used.
+
 # Autowelder
 This program was developed to be used with FLIR BFS-U3-50S5C cameras. The program calculates the size of a gap in a selected region and displays pass/fail depending on how that size compares to the size limits set. To increase stability a fixture point feature is included which tracks a color/feature and adjusts coordinates as that point moves. The program initializes and connects to the camera to receive images, and uses OpenCV to process the images. PySimpleGUI is used to display and interact with the image processing settings. The program is used to locate the center of a weld and calculate the distance from the true position.
 
