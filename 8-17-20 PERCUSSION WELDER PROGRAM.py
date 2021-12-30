@@ -16,8 +16,8 @@ initialized_vars = pickle.load(open('GUIsave.txt.','rb'))
 print(initialized_vars)
 globals().update(initialized_vars)
 
-#low_H = 0;         high_H = 180 #
-#low_S = 66;         high_S = 255 # PRESET VALUES WHICH ARE KNOWN TO PRODUCE GOOD RESULTS
+low_H = 6;         high_H = 26 #
+low_S = 0;         high_S = 255 # PRESET VALUES WHICH ARE KNOWN TO PRODUCE GOOD RESULTS
 #low_V = 0;         high_V = 255 #
 
 
