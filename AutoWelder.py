@@ -1,140 +1,190 @@
+#AUTOWELDER PROGRAM
+#USED TO MEASURE GAP BETWEEN ELECTRODE AND WELDING FIXTURE, DISPLAYS PASS/FAIL POSITIONING TO OPERATOR (PRESENCE OF GAP LEADS TO WELDS OUTSIDE OF TOLERANCE)
+#GAP REGION CAN BE SELECTED AND DETECTION __ARAMETERS FINE TUNED, FIXTURE POINT CAN BE USED TO TRACK MARKED POINT ON WELD FIXTURE KEEPING GAP CHECK BOX ALIGNED WITH ELECTRODE EDGE
+
 import math, base64, pickle, PySpin, time, threading, queue
 import sys, os, cv2, re, pdb
+import functools
+#from functools mport lru_cache
 import PySimpleGUI as sg
 import numpy as np
 from timeit import default_timer as timer
 import ctypes
+import cProfile, pstats
 
-#initialized_vars = pickle.load(open('pGUI.txt.','rb'))
 sg.theme('Reds')
-# Define the window layout-----------------------------------------------------------------------------------------------
 
-#Layout for Camera 0~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~
-class Instance: #Creates pyGUI window for each camera instance
+class WelderInstance: #INSTANCE OF CAMERA
     def __init__(self, settings):
-        #self.cam = None
         self.start = 0
-        self.config= {'SQUARE LOW H':0,'SQUARE HIGH H':180,'SQUARE LOW S':0,'SQUARE HIGH S':255,'SQUARE LOW V':0,'SQUARE HIGH V':255,'SQUARE CANNY A':100,'SQUARE CANNY B':200,'SQUARE CANNY C':1,'SQUARE X':0,'SQUARE Y':0,'sq_x1':600,'sq_x2':900,'sq_y1':600,'sq_y2':900,'Area Height':200,'Area Width':200,'Box Height':40,'Box Width':70,'Gap Threshold':100,'Light Threshold':50,'cMin':100,'cMax':1500,'Fixture':False,'f_x1':600,'f_x2':900,'f_y1':600,'f_y2':900,
-                      'FixtureBox':True,'FixtureVisible':False,'ROTATE':False,'wRmax':100,'Legacy':True,'Exposure':5195,'Gain':20,'Output':'None','t_min':1,'t_max':255,'CANNY V':31,'morph':1,'morph kernel':1,'dilate':1,'h_lineThresh':50,'v_lineThresh':50,'KERNEL':10,'LOCATION':(10,100),'ix':279,'iy':286,'ox':290,'oy':295,'icirr':82,'ocirr':147,'rx1':262,'rx2':692,'ry1':423,'ry2':793,'region_selected':True,'LOW H':6,'HIGH H':26,'LOW S':0,'HIGH S':255,'LOW V':0,'HIGH V':255,'thresh_val':84,'e_x':770,'e_y':10,'e_w':96,'e_h':59,'w_x':114,'w_y':301,'w_w':472,'w_h':440,'v_x1':709,'v_y1':419,'v_x2':866,'v_y2':671,'h_x1':340,'h_y1':273,'h_x2':663,'h_y2':441,'RESIZE':50.0,'CIRCLES':True,'OUTLINE':False,'ALL CIRCLES':False,'BOXES':True,'EDGES':True,'Weld Status':True,'RCenter':True,'X Shift':50.0,'Y Shift':50.0,'Th':10.0,'0':True,'THRESH':False,'THRESH SLIDER MIN':28.0,'THRESH SLIDER MAX':255.0,'CANNY':False,'CANNY A':7.0,'CANNY B':37.0,'BLUR':False,'BLUR VAL':5.0,'HSV':False,'CANNY LOW H':6.0,'CANNY HIGH H':26.0,'CANNY LOW S':0.0,'CANNY HIGH S':255.0,'CANNY LOW V':0.0,'CANNY HIGH V':255.0,'HOUGH LOW H':6.0,'HOUGH HIGH H':26.0,'HOUGH LOW S':0.0,'HOUGH HIGH S':255.0,'HOUGH LOW V':0.0,'HOUGH HIGH V':255.0,'V VECTOR':213.0,'H VECTOR':316.0,'minR':52.0,'maxR':137.0,'minDist':1,'PARAM1':1,'PARAM2':20.0,'PARAM3':15.0,'lineThresh':0,'minLineLength':50,'maxLineGap':15,}
+        self.config= {'Fixture Enable':False, 'Fixture Features Visible':False, 'Fixture Region Visible':False, 'Fixture Threshold':(0,0,0,180,255,255), 'Fixture Offset':(50,50), 'Fixture Reverse':(0,0),
+                      'Fixture Region':(0,0,1,1), 'Contour Bounds':(0,0,1,1), 'Highlight Size':(200,200), 'Gap Box Size':(70,40), 'Gap Size Limit':100, 'Gap Light Threshold':50, 'Contour Size':(100,200),
+                      'Output':'None', 'Kernel':10, 'Blur Value':5, 'Window Size':50, 'Window Location':(10,100), 'Electrode ROI':(600,900)}
         
         if settings is not None: self.config.update(settings)
 
+        #DEFAULT OPERATOR TAB
         self.tab0 = [
-            [sg.CBox('Use Fixture Point',     size=(35,1), key='Fixture',        default=self.config['Fixture'])],
-            [sg.CBox('Reverse X Offset',          size=(35,1), key='REVERSEX',       default=False)],
-            [sg.CBox('Reverse Y Offset',          size=(35,1), key='REVERSEY',       default=False)],
-            [sg.CBox('Hide Overlay',          size=(35,1), key='HIDE ALL',       default=False)],
-            [sg.CBox('Show Fixture Area',     size=(35,1), key='FixtureBox',     default=self.config['FixtureVisible'])],
-            [sg.CBox('Show Fixture Features', size=(35,1), key='FixtureVisible', default=self.config['FixtureVisible'])],
+            [sg.CBox('Use Fixture Point',     size=(35,1),   key='Fixture Enable',           default=self.config['Fixture Enable'])],
+            [sg.CBox('Show Fixture Region',   size=(35,1),   key='Fixture Region Visible',   default=self.config['Fixture Region Visible'])],
+            [sg.CBox('Show Fixture Features', size=(35,1),   key='Fixture Features Visible', default=self.config['Fixture Features Visible'])],
+            [sg.CBox('Reverse X Offset',      size=(35,1),   key='Fixture Reverse X',        default=self.config['Fixture Reverse'][0])],
+            [sg.CBox('Reverse Y Offset',      size=(35,1),   key='Fixture Reverse Y',        default=self.config['Fixture Reverse'][1])],
+            [sg.CBox('Hide Overlay',          size=(35,1),   key='Hide Overlay',             default=False)],
             [sg.Frame('Fixture',[
-            [sg.Text('X Offset',size=(10,1)),   sg.Slider((0, 500),self.config['SQUARE X'],    1,orientation='h',size=(36, 10),key='SQUARE X')],
-            [sg.Text('Y Offset',size=(10,1)),   sg.Slider((0, 500),self.config['SQUARE Y'],    1,orientation='h',size=(36, 10),key='SQUARE Y')],
-            [sg.Text('Box Height',size=(10,1)), sg.Slider((10, 200),self.config['Box Height'], 1,orientation='h',size=(36, 10),key='Box Height')],
-            [sg.Text('Box Width',size=(10,1)),  sg.Slider((10, 200),self.config['Box Width'],  1,orientation='h',size=(36, 10),key='Box Width')]])]    
-
+            [sg.Text('X Offset',              size=(10,1)),
+             sg.Slider(range=(0, 600),        size=(36, 10), key='X Offset',                 default_value=self.config['Fixture Offset'][0], orientation='h',)],
+            [sg.Text('Y Offset',              size=(10,1)),
+             sg.Slider(range=(0, 600),        size=(36, 10), key='Y Offset',                 default_value=self.config['Fixture Offset'][1], orientation='h',)],
+            [sg.Text('Box Height',            size=(10,1)),
+             sg.Slider(range=(10, 200),       size=(36, 10), key='Gap Box Height',           default_value=self.config['Gap Box Size'][1],    orientation='h',)],
+            [sg.Text('Box Width',             size=(10,1)),
+             sg.Slider(range=(10, 200),       size=(36, 10), key='Gap Box Width',            default_value=self.config['Gap Box Size'][0],     orientation='h',)]])]
         ]
         
+        #SETTINGS TAB, ADJUSTS FIXTURE AND GAP DETECTION SETTINGS
         self.tab1 = [      
-            [sg.Radio('None',       'Radio', True),
-             sg.Radio('Fixture HSV','Radio', key='SQUARE HSV'),
-             sg.Radio('Gap HSV',    'Radio', key='GAP HSV'),
-             sg.Radio('Misc',       'Radio', key='SQUARE MISC')],
+            [sg.Radio('None',                 group_id=0,    key='None',                     default=True),
+             sg.Radio('Fixture HSV',          group_id=0,    key='Fixture HSV',              default=False),
+             sg.Radio('Gap HSV',              group_id=0,    key='GAP HSV',                  default=False),
+             sg.Radio('Misc',                 group_id=0,    key='SQUARE MISC',              default=False)],
             [sg.Frame('Image',[
-            [sg.Text('Blur/Kernel',size=(8,1)),
-             sg.Slider((0, 11),self.config['BLUR VAL'],1,orientation='h',size=(18, 10),key='BLUR VAL'),
-             sg.Slider((1, 10),self.config['KERNEL'],  1,orientation='h',size=(18, 10),key='KERNEL')]])],
+            [sg.Text('Blur/Kernel',           size=(8,1)),
+             sg.Slider(range=(0, 11),         size=(18, 10), key='Blur Value',               default_value=self.config['Blur Value'],            orientation='h',),
+             sg.Slider(range=(1, 10),         size=(18, 10), key='Kernel',                   default_value=self.config['Kernel'],                orientation='h',)]])],
             [sg.Frame('Fixture',[
             [sg.Text('Size',size=(4,1)),
-             sg.Slider((0, 100),self.config['cMin'],          1,orientation='h',size=(20, 10),key='cMin'),
-             sg.Slider((0, 600),self.config['cMax'],          1,orientation='h',size=(20, 10),key='cMax')],
+             sg.Slider(range=(0, 100),        size=(20,10),  key='Contour Min',              default_value=self.config['Contour Size'][0],                  orientation='h'),
+             sg.Slider(range=(0, 255),        size=(20,10),  key='Contour Max',              default_value=self.config['Contour Size'][1],                  orientation='h')],
             [sg.Text('HUE',size=(4,1)),
-             sg.Slider((0, 180),self.config['SQUARE LOW H'],  1,orientation='h',size=(20, 10),key='SQUARE LOW H'),
-             sg.Slider((0, 180),self.config['SQUARE HIGH H'], 1,orientation='h',size=(20, 10),key='SQUARE HIGH H')],
+             sg.Slider(range=(0, 180),        size=(20,10),  key='Fixture h',                default_value=self.config['Fixture Threshold'][0],  orientation='h'),
+             sg.Slider(range=(0, 180),        size=(20,10),  key='Fixture H',                default_value=self.config['Fixture Threshold'][3],  orientation='h')],
             [sg.Text('SAT',size=(4,1)),
-             sg.Slider((0, 255),self.config['SQUARE LOW S'],  1,orientation='h',size=(20, 10),key='SQUARE LOW S'),
-             sg.Slider((0, 255),self.config['SQUARE HIGH S'], 1,orientation='h',size=(20, 10),key='SQUARE HIGH S')],
+             sg.Slider(range=(0, 255),        size=(20,10),  key='Fixture s',                default_value=self.config['Fixture Threshold'][1],  orientation='h'),
+             sg.Slider(range=(0, 255),        size=(20,10),  key='Fixture S',                default_value=self.config['Fixture Threshold'][4],  orientation='h')],
             [sg.Text('VAL',size=(4,1)),
-             sg.Slider((0, 255),self.config['SQUARE LOW V'],  1,orientation='h',size=(20, 10),key='SQUARE LOW V'),
-             sg.Slider((0, 255),self.config['SQUARE HIGH V'], 1,orientation='h',size=(20, 10),key='SQUARE HIGH V')]])],
+             sg.Slider(range=(0, 255),        size=(20,10),  key='Fixture v',                default_value=self.config['Fixture Threshold'][2],  orientation='h'),
+             sg.Slider(range=(0, 255),        size=(20,10),  key='Fixture V',                default_value=self.config['Fixture Threshold'][5],  orientation='h')]])],
             [sg.Frame('Gap',[
-            [sg.Text('Light Threshold', size=(12,1)), sg.Slider((0, 255),  self.config['Light Threshold'], 1,orientation='h',size=(34, 10),key='Light Threshold')],
-            [sg.Text('Gap Threshold',   size=(12,1)), sg.Slider((1, 200),  self.config['Gap Threshold'],   1,orientation='h',size=(34, 10),key='Gap Threshold')],
-            [sg.Text('Highlight Height',size=(12,1)), sg.Slider((100, 300),self.config['Area Height'],     1,orientation='h',size=(34, 10),key='Area Height')],
-            [sg.Text('Highlight Width', size=(12,1)), sg.Slider((100, 300),self.config['Area Width'],      1,orientation='h',size=(34, 10),key='Area Width')]])]
+            [sg.Text('Light Threshold',       size=(12,1)),
+             sg.Slider(range=(0, 255),        size=(34,10),  key='Gap Light Threshold',      default_value=self.config['Gap Light Threshold'],       orientation='h')],
+            [sg.Text('Gap Threshold',         size=(12,1)),
+             sg.Slider(range=(1, 200),        size=(34,10),  key='Gap Size Limit',           default_value=self.config['Gap Size Limit'],         orientation='h')],
+            [sg.Text('Highlight Height',      size=(12,1)),
+             sg.Slider(range=(100, 300),      size=(34,10),  key='Highlight Height',         default_value=self.config['Highlight Size'][1],     orientation='h')],
+            [sg.Text('Highlight Width',       size=(12,1)),
+             sg.Slider(range=(100, 300),      size=(34,10),  key='Highlight Width',          default_value=self.config['Highlight Size'][0],     orientation='h')]])]
         ]
-        
+
+        list_data     = [[''],['No Fixture', 'Check if Fixture enabled'],['Not opening', 'close all programs and restart, try to check and see if the window is appearing on another monitor']]
+        headings_data = ['Problem', 'Solution']
+
         self.tab2 = [
-            [sg.Radio('None',    'Debug', True,  key='none'),
-             sg.Radio('Bitwise', 'Debug', False,  key='bitwise'),
-             sg.Radio('Overlay', 'Debug', False,  key='Overlay')],
-            [sg.CBox('Load Image',        False,  key='imload')],
-            [sg.Text('Image Select',size=(9,1)),
-             sg.Slider((1, 10),1,                        1,orientation='h', size=(20,15),key='imsave')],
+            # [sg.Table(values=data[1:][:], headings=headings, max_col_width=25,
+            #         # background_color='light blue',
+            #         auto_size_columns=True,
+            #         display_row_numbers=True,
+            #         justification='right',
+            #         num_rows=20,
+            #         alternating_row_color='lightyellow',
+            #         key='-TABLE-',
+            #         row_height=35,
+            #         tooltip='This is a table')],
+            [sg.Table(values = list_data, headings = headings_data, max_col_width = 25, auto_size_columns = True, display_row_numbers = False,
+                justification = 'left', num_rows = 5, #alternating_row_color = 'lightblue',
+                key = 'Test Table', row_height = 47)]
+        ]
+
+        self.tab3 = [
+            [sg.Radio('None',                 group_id=0,    key='None',                     default=False),
+             sg.Radio('Bitwise',              group_id=0,    key='bitwise',                  default=False),
+             sg.Radio('Overlay',              group_id=0,    key='Overlay',                  default=False)],
+            [sg.CBox('Load Image',            size=(9,1),    key='imload',                   default=False)],               #SIZE?
+            [sg.Text('Image Select',          size=(9,1)),
+             sg.Slider(range=(1, 10),         size=(20,15),  key='imsave',                   default_value=1,     orientation='h')],
             [sg.Frame('Camera Settings',[
             [sg.Text('Save and exit to apply settings')],
-            [sg.Text('FPS',size=(9,1)),     sg.InputText(self.config['FPS'],     size=(9,1),  key='FPS')],
-            [sg.Text('Exposure',size=(9,1)),sg.InputText(self.config['Exposure'],size=(9,1),  key='Exposure')],
-            [sg.Text('Gain',size=(9,1)),    sg.InputText(self.config['Gain'],    size=(9,1),  key='Gain')]])]
+            [sg.Text('FPS',                   size=(9,1)),
+             sg.Input(self.config['FPS'],     size=(9,1),    key='FPS')],
+             #sg.InputText(self.config['FPS'], size=(9,1),  key='FPS')],
+            [sg.Text('Exposure',              size=(9,1)),
+             sg.Input(                        size=(9,1),    key='Exposure',                 default_text=self.config['Exposure'],)],
+            [sg.Text('Gain',                  size=(9,1)),
+             sg.Input(                        size=(9,1),    key='Gain',                     default_text=self.config['Gain'])]])]
         ]
         
         self.col = [
-            [sg.Text('Window Size:'),sg.Slider((1, 100),self.config['RESIZE'],1,orientation='h',size=(36, 15),key='RESIZE')],
-            [sg.Button('Select Front Edge'),sg.Button('Select Fixture'),sg.Button('Capture Image'),sg.Button('Save and Exit')],
-            [sg.TabGroup([[sg.Tab('Operation',self.tab0), sg.Tab('Settings', self.tab1),sg.Tab('Debugging',self.tab2)]])]            
+            [sg.Text('Window Size:'),
+             sg.Slider(range=(10, 100),      size=(34,10),  key='Window Size',               default_value=self.config['Window Size'],     orientation='h')],
+            [sg.Button('Select Front Edge'),    sg.Button('Select Fixture'),    sg.Button('Capture Image'),    sg.Button('Save and Exit')],
+            [sg.TabGroup([[sg.Tab('Operation', self.tab0), sg.Tab('Settings', self.tab1), sg.Tab('Help', self.tab2), sg.Tab('Debugging', self.tab3)]])]            
         ]
 
         self.layout = [
-            [sg.Image(filename="", key='IMG',enable_events=True),sg.Column(self.col)]
+            [sg.Image(filename="", key='IMG', enable_events=True), sg.Column(self.col)]
         ]
         
-        self.window = sg.Window(self.config['CAM ID'], self.layout, location=self.config['LOCATION'])
+        self.window = sg.Window(self.config['Welder ID'], self.layout, location=self.config['Window Location'])
 
-#### MAIN LOOP #####################################################################################################################################################################
+        
+
+ #### MAIN LOOP #####################################################################################################################################################################
     def loop(self):
         self.cycle = timer() - self.start; self.start = timer();
         self.event, self.values = self.window.read(timeout=20)
+    #CHECK EVENTS AND PERFORM ASSOCIATED FUNCTION
         if self.event == sg.WIN_CLOSED           : return False#os._exit(0)
-        if self.event == 'Select Front Edge'     : self.image.overlay *= False; cv2.putText(self.image.overlay,'Click and drag to draw box, place center of cross at center of front edge',(150,self.image.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1); self.config.update(dict(zip(['sq_x1','sq_x2','sq_y1','sq_y2'],self.image.select_region(self.window.CurrentLocation()))))
-        if self.event == 'Select Fixture'        : self.image.overlay *= False; cv2.putText(self.image.overlay,'Click and drag to draw box around Fixture Square',(150,self.image.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1); self.config.update(dict(zip(['f_x1','f_x2','f_y1','f_y2'],self.image.select_region(self.window.CurrentLocation()))))
-        if self.event == 'Save and Exit'         : self.save_and_exit({'LOCATION':self.window.CurrentLocation()})#Saves all settings to file
-        if self.event == 'Capture Image'         : pickle.dump(self.cam.get_image(self.config['ROTATE']), open('image{}.txt'.format(str(int(self.values['imsave']))), 'wb'))
-                
-        if not self.values['imload']:
-            self.image = Frame(self.cam.get_image(),self.config['ROTATE'])#Get image from camera and pre-process, creates image object with layers as properties
-        else:
-            try:    self.image = Frame(pickle.load(open('image{}.txt'.format(str(int(self.values['imsave']))),'rb')),self.config['ROTATE'])
-            except: self.image = Frame(self.cam.get_image(),self.config['ROTATE'])
+        if self.event == 'Save and Exit'         : self.save_and_exit({'LOCATION':self.window.CurrentLocation()})
+        if self.event == 'Capture Image'         : pickle.dump(self.cam.get_image(), open('image{}.txt'.format(str(int(self.values['imsave']))), 'wb'))
+        if self.event == 'Select Front Edge'     :
+            self.image.overlay *= False
+            cv2.putText(self.image.overlay,'Click and drag to draw box, place center of cross at center of front edge',(150,self.image.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1)
+            self.config.update({'Electrode ROI': self.image.select_region(self.window.CurrentLocation(), bounds = False)})
+        if self.event == 'Select Fixture'        :
+            self.image.overlay *= False
+            cv2.putText(self.image.overlay,'Click and drag to draw box around Fixture Square',(150,self.image.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1)
+            self.config.update({'Fixture Region': self.image.select_region(self.window.CurrentLocation(), bounds = True)})
         
-        cv2.putText(self.image.overlay, 'Cycle:%.3f'%self.cycle, (30,self.image.height-24), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2)#display cycle time
-        
-        try:
-            sqx, sqy = self.image.find_gap(self.image.blur(self.image.img,self.values['BLUR VAL'], (int(2*self.values['KERNEL']+1))),
-                self.values['Fixture'],self.values['FixtureBox'],self.values['FixtureVisible'],
-                self.values['SQUARE LOW H'],self.values['SQUARE LOW S'],self.values['SQUARE LOW V'],
-                self.values['SQUARE HIGH H'],self.values['SQUARE HIGH S'],self.values['SQUARE HIGH V'],
-                self.config['f_x1'],self.config['f_x2'],self.config['f_y1'],self.config['f_y2'],
-                self.config['sq_x1'],self.config['sq_x2'],self.config['sq_y1'],self.config['sq_y2'],
-                self.values['SQUARE X'],self.values['SQUARE Y'],self.values['REVERSEX'],self.values['REVERSEY'],
-                100*self.values['cMin'],100*self.values['cMax'])
-        except:raise(Exception)
-        
-            
-        self.image.highlight(0,0,0,180,255,self.values['Light Threshold'],
-                             int(sqx),#+self.values['SQUARE X']),#X GAP CENTER
-                             int(sqy),#+self.values['SQUARE Y']),#Y GAP CENTER
-                             int(self.values['Box Width']),int(self.values['Box Height']),
-                             int(self.values['Area Width']),int(self.values['Area Height']),int(self.values['Gap Threshold']))
 
-        self.config['Output'] = (self.values['SQUARE HSV']*'SQUARE HSV'+self.values['GAP HSV']*'GAP HSV'+self.values['Overlay']*'Overlay'+self.values['bitwise']*'bitwise')
-        self.image.overlay *= not self.values['HIDE ALL']
-        self.window['IMG'].update(data=self.image.output(self.values['RESIZE'],self.config['Output']))
+    #DEFINE VARAIABLES TO AVOID CONSTANT READS FROM VALUES DICTIONARY
+        self.fixture_region_visible   = self.values['Fixture Region Visible']
+        self.fixture_features_visible = self.values['Fixture Features Visible']
+        self.fixture_threshold_values = (self.values['Fixture h'], self.values['Fixture s'], self.values['Fixture v'], self.values['Fixture H'], self.values['Fixture S'], self.values['Fixture V'])
+        self.fixture_offset           = (self.values['X Offset']*(-1 if self.values['Fixture Reverse X'] else 1), self.values['Y Offset']*(-1 if self.values['Fixture Reverse Y'] else 1))
+        self.contour_size             = (self.values['Contour Min'], self.values['Contour Max'])
+        self.highlight_size           = (int(self.values['Highlight Width']), int(self.values['Highlight Height']))
+        self.gap_box_size             = (int(self.values['Gap Box Width']), int(self.values['Gap Box Height']))
+        self.gap_threshold            = self.values['Gap Light Threshold']
+        self.gap_size_limit           = self.values['Gap Size Limit']
+        self.fixture_region           = self.config['Fixture Region']
+        self.electrode_roi            = self.config['Electrode ROI']
+
+        if self.values['imload']: #LOAD SAVED IMAGE IF ENABLED IN GUI
+            try:
+                self.image = Frame(pickle.load(open('image{}.txt'.format(str(int(self.values['imsave']))),'rb')))
+            except:
+                None    #self.image = Frame(self.cam.get_image())#Get image from camera and pre-process, creates image object with layers as properties
+        else:
+            self.image = Frame(self.cam.get_image())
+            
+        cv2.putText(self.image.overlay, 'Cycle:%.3f'%self.cycle, (30,self.image.height-24), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2)#display cycle time
+        self.image.blurred = self.image.blur(self.image.img, int(self.values['Blur Value']), (int(2*self.values['Kernel']+1)))
+
+        if self.values['Fixture Enable']:
+            fixture_point = self.image.locate_fixture(self.image.blurred, self.fixture_region, self.fixture_threshold_values, self.contour_size, self.fixture_region_visible, self.fixture_features_visible)
+            if fixture_point: self.electrode_roi = (fixture_point[0] + fixture_offset[0], fixture_point[1] +  fixture_offset[1])
+
+        self.image.draw_highlight(self.gap_threshold, self.electrode_roi, self.highlight_size, self.gap_box_size, self.gap_size_limit)
+
+        self.config['Output'] = (self.values['Fixture HSV']*'Fixture HSV'+self.values['GAP HSV']*'GAP HSV'+self.values['Overlay']*'Overlay'+self.values['bitwise']*'bitwise') #SUM OF PRODUCTS, ONLY 1 SHOULD REMAIN
+        self.image.overlay *= not self.values['Hide Overlay'] #HIDE OVERLAY
+        self.window['IMG'].update(data=self.image.output(self.values['Window Size'],self.config['Output'])) #SEND IMAGE TO WINDOW
         return True
-####################################################################################################################################################################################
 
     def save_and_exit(self, location):
         self.config.update(location)
         self.config.update(self.values)
-        pickle.dump(self.config, open('{}Psave.txt'.format(self.config['CAM ID']), 'wb'))
+        pickle.dump(self.config, open('{}Psave.txt'.format(self.config['Welder ID']), 'wb'))
         self.cam.exit()
         self.window.close()
         os._exit(0)
@@ -143,22 +193,22 @@ class Instance: #Creates pyGUI window for each camera instance
         self.cam.exit()
 
 class Frame:   
-    def __init__(self, array, rotation):
+    def __init__(self, array):
         self.img         = array
         self.img         = cv2.cvtColor(self.img,cv2.COLOR_BayerRG2RGB)
-        if rotation:     self.img = np.rot90(self.img,3)#
-        self.img         = cv2.pyrDown(self.img)
+        #ROTATION NO LONGER USED#self.img         = rotation * np.rot90(self.img,3)#Rotates image 90 degrees
+        self.img         = cv2.pyrDown(self.img)#scales image down 1/4
         self.height      = self.img.shape[0]
         self.width       = self.img.shape[1]
-        self.empty       = np.zeros_like(self.img)
-        self.overlay     = np.zeros_like(self.img)
-        self.cannyThresh = np.zeros_like(self.img)
-        self.houghThresh = np.zeros_like(self.img)
+        self.empty       = np.zeros_like(self.img)#initializing empty arrays
+        self.overlay     = np.zeros_like(self.img)#
+        self.cannyThresh = np.zeros_like(self.img)#
+        self.houghThresh = np.zeros_like(self.img)#
 
     def output(self, *args):
         try:
-            if args[1]   == 'SQUARE HSV': self.out = self.squareThresh
-            elif args[1] == 'GAP HSV'   : self.out = self.gapThresh       
+            if args[1]   == 'Fixture HSV': self.out = self.fixture_threshold_image
+            elif args[1] == 'GAP HSV'   : self.out = self.gap_threshold_image
             elif args[1] == 'Overlay'   : self.out = self.overlay
             elif args[1] == 'bitwise'   : self.out = cv2.bitwise_or(self.img, self.overlay)
             else                        : self.out = np.where(self.overlay == 0, self.img, self.overlay)
@@ -168,77 +218,82 @@ class Frame:
         except: raise(Exception)
 
     def blur(self, array, blur, kernel):
-        out = cv2.GaussianBlur(array, (kernel,kernel), blur)
-        return out
+        _out = cv2.GaussianBlur(array, (kernel,kernel), blur)
+        return _out
 
-    def thresh(self, array, h,s,v,H,S,V,*args):
-        out = cv2.cvtColor(array, cv2.COLOR_BGR2HSV)
-        out = cv2.inRange(out, (h,s,v),(H,S,V))
-        return out
+    def morph_close(self, array, kernel):
+        _kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel,kernel))
+        _out = cv2.morphologyEx(array, cv2.MORPH_CLOSE, _kernel, 3)
+        return _out
 
-    def select_region(self, loc):
-        #cv2.putText(self.img,'Click and drag to draw box, place center of cross at center of front edge',(150,self.height-64),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,(1,255,255),1)
-        cv2.putText(self.img,'SELECT WITH MOUSE, SPACEBAR TO CONFIRM',(50,self.height-24),cv2.FONT_HERSHEY_COMPLEX_SMALL,2,(1,255,255),2)
+    def thresh(self, array, threshold):
+        h, s, v, H, S, V = threshold
+        _out = cv2.cvtColor(array, cv2.COLOR_BGR2HSV)
+        _out = cv2.inRange(_out, (h,s,v),(H,S,V))
+        return _out
+
+    def select_region(self, loc, bounds):
+        cv2.putText(self.img,'SELECT WITH MOUSE, SPACEBAR TO CONFIRM',(50,self.height-24),cv2.FONT_HERSHEY_COMPLEX_SMALL,2,(1,255,255),2) #WRITE INSTRUCTIONS ONTO IMAGE
         cv2.namedWindow('ROI', cv2.WINDOW_AUTOSIZE)
-        cv2.moveWindow('ROI', loc[0], 0)
-        (x,y,w,h) = cv2.selectROI('ROI', cv2.bitwise_or(self.img, self.overlay))#cv2.pyrDown(cv2.bitwise_or(self.img, self.overlay)))
+        cv2.moveWindow('ROI', loc[0], 0) #MOVE TO CURRENT WINDOW LOCATION
+        x, y, w, h = cv2.selectROI('ROI', cv2.bitwise_or(self.img, self.overlay)) #CALL ROI SELECTION AND SAVE RESULTS
         cv2.destroyAllWindows()
-        return [int(x),int(x+w),int(y),int(y+h)]
+        if not bounds: #RETURN CENTER OF ROI, ELSE RETURN CORNER POINTS TO USE IN RECT
+            return (int(x+w/2), int(y+h/2))
+        return (int(x),int(x+w),int(y),int(y+h))
 
+    def locate_fixture(self, array, fixture_region, fixture_threshold_values, contour_size, fixture_region_visible, fixture_features_visible):
+        #FINDS BLOBS USING HUE/SATURATION/VALUE AND SIZE CONSTRAINTS, FOR LARGEST RETURNS CENTERPOINT IF FOUND
+            self.fixture_threshold_image = self.thresh(array, fixture_threshold_values) #THRESHOLD IMAGE USING HSV
+            x_1, x_2, y_1, y_2 = fixture_region #DEFINE REGION BOUNDS
+            _contours, _hierarchy = cv2.findContours(self.fixture_threshold_image[y_1:y_2,x_1:x_2], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) #FIND COUNTOURS IN THRESHOLD
+            if fixture_region_visible: #DRAW REGION IF ENABLED IN GUI
+                cv2.rectangle(self.overlay, (x_1, y_1), (x_2, y_2), (36, 255, 12), 2) #DRAW RECTANGLE AROUND SEARCH REGION
+            if not _contours: #RETURN IF NO CONTOURS FOUND
+                return False
+            if fixture_features_visible: #DRAW COUNTOUR BOUNDS AND LABEL AREAS IF ENABLED IN GUI
+                cv2.drawContours(self.overlay[y_1:y_2,x_1:x_2], _contours, -1, (36, 255, 12), 2) #DRAW ALL CONTOURS
+                _sorted_contour_list = [(_contour, str(int(cv2.contourArea(_contour)/100))) for _contour in _contours if cv2.contourArea(_contour) > 100] #CREATE LIST OF TUPLES (CONTOUR, STR(AREA)) FOR CONTOURS OVER 100
+                for _contour in _sorted_contour_list: #LABEL EACH CONTOUR FROM SORTED LIST
+                    x, y, w, h = cv2.boundingRect(_contour[0]) #GET BOUNDING RECTANGLE AROUND CONTOUR
+                    _contour_string_position = (int(x_1 + x + w/2),int(y_1 + y + h + 5)) #CALCULATE POSITION UNDERNEATH CONTOUR
+                    cv2.putText(self.overlay, _contour[1], _contour_string_position, cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2) #LABEL AREA BELOW CONTOUR RECT
+            _contour_area_list = [cv2.contourArea(contour) for contour in _contours] #LIST OF AREAS FOR EACH CONTOUR
+            _max_index = _contour_area_list.index(max(_contour_area_list)) #INDEX OF LARGEST CONTOUR (BEST CANDIDATE FOR FIXTURE POINT)
+            _fixture_area = _contour_area_list[_max_index] #AREA OF LARGEST CONTOUR
+            _fixture_contour = _contours[_max_index] #CONTOUR OF PROPOSED FIXTURE POINT
+            if not contour_size[0] < _fixture_area < contour_size[1]: #RETURN NOTHING IF FIXTURE POINT OUTSIDE SIZE RANGE SELECTED IN GUI
+                return False
+            x, y, w, h = cv2.boundingRect(_fixture_contour) #BOUNDING RECTANGLE OF CONTOUR
+            _fixture_point_x, fixture_point_y = int(x_1 + x + w/2), int(y_1 + y + h/2) #CALCULATE FIXTURE CENTERPOINT
+            cv2.putText(self.overlay, 'Fixture:({},{}),  {:.0f}'.format(_fixture_point_x,_fixture_point_y,area/100), (600,self.height-24), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2) #LABEL FIXTURE POINT POSITION BOTTOM OF WINDOW
+            cv2.circle(self.overlay, (_fixture_point_x,_fixture_point_y), 10, (255,36,255), -1) #DRAW CIRCLE AT FIXTURE CENTERPOINT
+            return (_fixture_point_x,_fixture_point_y)
 
-    def find_gap(self,array,Fixture,FixtureBox,FixtureVisible,h,s,v,H,S,V,fx1,fx2,fy1,fy2,x1,x2,y1,y2,xoff,yoff,reversex,reversey,cmin,cmax):
-        if reversex:
-            xoff *= -1
-        if reversey:
-            yoff *= -1
-        self.squareThresh = self.thresh(array, h, s, v, H, S, V)
-        if Fixture:
-            contours, _hierarchy = cv2.findContours(self.squareThresh[fy1:fy2,fx1:fx2], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if FixtureBox: cv2.rectangle(self.overlay, (fx1, fy1), (fx2,fy2), (36,255,12), 2)
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                x,y,w,h = cv2.boundingRect(contour)
-                if FixtureVisible:
-                    cv2.drawContours(self.overlay[fy1:fy2,fx1:fx2], contours, -1, (36,255,12), 2)
-                    if area > 10: cv2.putText(self.overlay, str(int(area/100)), (int(fx1+x+w/2),int(fy1+y+h+5)), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2)
-                if area > cmin and area < cmax:
-                    cv2.putText(self.overlay, 'Fixture:({},{}),  {:.0f}'.format(int(fx1+x+w/2),int(fy1+y+h/2),area/100), (600,self.height-24), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2)
-                    cv2.circle(self.overlay, (int(fx1+x+w/2),int(fy1+y+h/2)), 10, (255,36,255), -1)
-                    if FixtureVisible:cv2.rectangle(self.overlay[fy1:fy2,fx1:fx2], (x, y), (x + w, y + h), (255,36,12), 2)
-                        
-                    return (fx1+xoff+x+w/2),(fy1+yoff+y+h/2)
-        return (x1+x2)/2, (y1+y2)/2
-
-        
-
-    def highlight(self,h,s,v,H,S,V,x,y,bw,bh,W,A,G):
-        self.gapThresh = cv2.cvtColor(self.img, cv2.COLOR_BGR2HSV)
-        self.gapThresh = cv2.inRange(self.gapThresh, (h,s,v),(H,S,V))
-        #[y-bh:y+bh,x-bw:x+bw]
-        try:
-            self.gap_area = np.sum(self.gapThresh[y-bh:y+bh,x-bw:x+bw]/255)
-            self.highlight = np.zeros_like(self.empty)
-            if self.gap_area < G:
-                self.highlight[:,:,:] = (0,255,0) #GREEN IMAGE
-                cv2.putText(self.overlay, 'OK'.format(self.gap_area), (500,70), cv2.FONT_HERSHEY_DUPLEX, 3, (1,255,1),5)
-            else                :
-                self.highlight[:,:,:] = (0,0,255) #RED IMAGE
-                cv2.putText(self.overlay, 'CHECK', (450,70), cv2.FONT_HERSHEY_DUPLEX, 3, (1,255,255),5)
-            self.highlight = cv2.bitwise_and(self.highlight,self.highlight, mask=self.gapThresh)#Cuts threshold out of RED or GREEN image
-            self.overlay[y-A:y+A,x-W:x+W] = np.where(self.highlight[y-A:y+A,x-W:x+W] == 0, self.overlay[y-A:y+A,x-W:x+W], self.highlight[y-A:y+A,x-W:x+W])#Applies highlight to area inside ROI
-            cv2.putText(self.overlay, 'Gap:{:.0f}'.format(self.gap_area), (300,self.height-24), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2)
-            cv2.rectangle(self.overlay, (x-bw,y-bh), (x+bw,y+bh), (255,1,1),3)
-        except:
-            raise(Exception)
-
-    
+    def draw_highlight(self, gap_threshold, electrode_roi, highlight_size, gap_box_size, gap_size_limit):
+            w, h = gap_box_size #WIDTH AND HEIGHT FOR GAP CHECKING BOX
+            x, y = electrode_roi #CENTERPOINT OF REGION OF INTEREST (ELECTRODE/FIXTURE EDGE)
+            a, b = highlight_size #WIDTH AND HEIGHT TO HIGHLIGHT GAP PIXELS
+            self.gap_threshold_image = cv2.cvtColor(self.img, cv2.COLOR_BGR2HSV) #CONVERT TO HSV
+            self.gap_threshold_image = cv2.inRange(self.gap_threshold_image, (0,0,0), (180,255,gap_threshold)) #THRESHOLD TO SELECT ANY PIXELS DARKER THAN THRESHOLD
+            self.gap_area = np.sum(np.true_divide(self.gap_threshold_image[y-h:y+h, x-w:x+w], 255)) #SUM REMAINING PIXELS INSIDE BOX REGION
+            self.highlight_image = np.zeros_like(self.empty) #CREATE EMPTY IMAGE
+            if self.gap_area < gap_size_limit: #IF PIXEL SUM LESS THAN LIMIT TURN IMAGE GREEN
+                self.highlight_image[:,:,:] = (0,255,0) #GREEN IMAGE
+                cv2.putText(self.overlay, 'OK'.format(self.gap_area), (500,70), cv2.FONT_HERSHEY_DUPLEX, 3, (1,255,1),5) #PRINT 'OK' AT TOP OF SCREEN FOR OPERATOR
+            else: #IF PIXEL SUM GREATER THAN LIMIT TURN IMAGE RED
+                self.highlight_image[:,:,:] = (0,0,255) #RED IMAGE
+                cv2.putText(self.overlay, 'CHECK', (450,70), cv2.FONT_HERSHEY_DUPLEX, 3, (1,255,255),5) #PRINT 'CHECK' AT TOP OF SCREEN FOR OPERATOR TO ADJUST ELECTRODE
+            self.highlight_image = cv2.bitwise_and(self.highlight_image,self.highlight_image, mask=self.gap_threshold_image) #CUT GAP PIXELS OUT OF RED/GREEN IMAGE
+            self.overlay[y-b:y+b, x-a:x+a] = np.where(self.highlight_image[y-b:y+b, x-a:x+a] == 0, self.overlay[y-b:y+b, x-a:x+a], self.highlight_image[y-b:y+b, x-a:x+a]) #DRAWS RED/GREEN HIGHLIGHT ONTO DISPLAYED IMAGE
+            cv2.putText(self.overlay, 'Gap:{:.0f}'.format(self.gap_area), (300,self.height-24), cv2.FONT_HERSHEY_DUPLEX, 1, (255,255,1),2) #PRINT GAP COUNT AT BOTTOM OF SCREEN
+            cv2.rectangle(self.overlay, (x-w, y-h), (x+w, y+h), (255,1,1),3) #DRAW RECTANGLE AROUND GAP CHECK AREA (ELECTRODE ROI + BOX)
     
 class Camera: #INITIALIZE SELECTED CAMERA, SET CAMERA PROPERTIES (STREAM BUFFER, FPS, EXPOSURE, GAIN)
     def __init__(self, cam_id, Gain, Exposure, FPS):
         self.system = PySpin.System.GetInstance()
         self.list = self.system.GetCameras()
         self.cam = self.list.GetBySerial(cam_id)
-        #self.cam = PySpin.System.GetInstance().GetCameras().GetBySerial(cam_id)
         self.cam.Init()
         self.nodemap = self.cam.GetNodeMap()
         self.height = self.cam.Height.GetValue()
@@ -252,7 +307,7 @@ class Camera: #INITIALIZE SELECTED CAMERA, SET CAMERA PROPERTIES (STREAM BUFFER,
         PySpin.CFloatPtr(self.nodemap.GetNode('ExposureTime')).SetValue(Exposure)
         PySpin.CFloatPtr(self.nodemap.GetNode('Gain')).SetValue(Gain)
         PySpin.CFloatPtr(self.nodemap.GetNode('AcquisitionFrameRate')).SetValue(FPS)
-        print('\nExposure = {:.2f}\nGain = {:.2f}\nFPS = {:.2f}'.format(PySpin.CFloatPtr(self.nodemap.GetNode('ExposureTime')).GetValue(),PySpin.CFloatPtr(self.nodemap.GetNode('Gain')).GetValue(),PySpin.CFloatPtr(self.nodemap.GetNode('AcquisitionFrameRate')).GetValue()),end='\n')
+        print('\nExposure = {:.2f}\tGain = {:.2f}\tFPS = {:.2f}'.format(PySpin.CFloatPtr(self.nodemap.GetNode('ExposureTime')).GetValue(),PySpin.CFloatPtr(self.nodemap.GetNode('Gain')).GetValue(),PySpin.CFloatPtr(self.nodemap.GetNode('AcquisitionFrameRate')).GetValue()),end='\n')
         self.cam.BeginAcquisition()
     
     def get_image(self):#RETRIEVE LATEST IMAGE FROM CAMERA
@@ -282,107 +337,149 @@ def get_window():
     EnumWindows(EnumWindowsProc(foreach_window), 0)
     return(titles)
 
-def startup():#Checks for connected cameras and settings file, loads preexisting settings for known cameras and returns settings dictionary
-    welders = {'20348005':'PW1','20347994':'PW3','20227035':'PWTest'}
-    settings = {'Exposure':5195,'Gain':20,'FPS':10}
-    cams = {'cam0':None,'cam1':None}
-    system = PySpin.System.GetInstance()
-    cam_list = system.GetCameras()
-    
-    #cam_list = PySpin.System.GetInstance().GetCameras()
-    open_windows = get_window()
-    
-    for i in range(cam_list.GetSize()):
-         cam_list.GetByIndex(i).Init()
-         cams.update({list(cams.keys())[i]:PySpin.CStringPtr(cam_list.GetByIndex(i).GetNodeMap().GetNode('DeviceID')).GetValue()})
-         cam_list.GetByIndex(i).DeInit
 
-    #for cam in cam_list:
-    #    cam.Init()
-    #    cams.update({list(cams.keys())[i]:PySpin.CStringPtr(cam.GetNodeMap().GetNode('DeviceID')).GetValue()})
-    #    cam.DeInit()
-        
-    N_cams = len([x for x in cams.values() if x is not None])
-    if N_cams == 0:
-        sg.popup('Error no Cameras detected, please try again')
+def welder_selector(cameras, welders):
+    DEBUG = False
+    _n_cams = len(cameras)
+    _n_weld = len(welders)
+    if _n_cams == 0 and DEBUG:
+        return 'Percussion Welder #2'
+    if _n_weld == 0 and not DEBUG:
+        sg.popup_timed('\nNo cameras detected\n\nCheck camera connection and try again\n',auto_close_duration=3)
         os._exit(0)
-    if N_cams == 1:
-        print('Camera detected attempting to load settings... ', end='')
-        if os.path.isfile('{}Psave.txt'.format(cams['cam0'])):
-            settings = pickle.load(open('{}Psave.txt'.format(cams['cam0']),'rb'))
-        else:
-            v = cam_setup(settings, list(cams.values())[0], welders[list(cams.values())[0]])
-            settings.update(v)
-    if N_cams == 2:
-        print('Multiple cameras detected...')        
-        options = [v for k, v in welders.items() if k in list(cams.values()) and k not in open_windows]
-        if len(options) == 0:
-            print('Already running both cameras!')
-            os.system('pause')
-            os._exit(0)
-        elif len(options) == 2:
-            config_layout = [
-                [sg.Text('Choose a camera:',    justification='left'),],
-                [sg.Listbox(values=options,size=(15, 3), key='CAM ID'),sg.Text('',size=(2,3))],
-                [sg.Submit(), sg.Cancel()]]
-            window = sg.Window('Window Title', config_layout)    
-            e, v = window.read(close=True)
-            if e == sg.WIN_CLOSED: os._exit(0)
-            if e == 'Cancel'     : os._exit(0)
-            if v['CAM ID'] == [] : v['CAM ID'] = options[0]
-            else                 : v['CAM ID'] = v['CAM ID'][0]
-            selected_welder = v['CAM ID']
-            
-        elif len(options) == 1:
-            selected_welder = options[0]
-            print('One camera already in use, running {}'.format(selected_welder))
-            
-        selected_cam = list(welders.keys())[list(welders.values()).index(selected_welder)]
-        if os.path.isfile('{}Psave.txt'.format(selected_cam)):
-            settings = pickle.load(open('{}Psave.txt'.format(selected_cam),'rb'))
-        else:
-            v = cam_setup(settings, selected_cam, selected_welder)
-            settings.update(v)
-            
-    #settings.update(pickle.load(open('GUIsave.txt','rb')))
-    #settings.update({'LOCATION':(10,100)})
-    settings.update(cams)
-    cam_list.Clear()
-    return settings
+        return None
+    if _n_weld == 1:
+        return welders[0]
+    if _n_weld >= 2:
+        sg.theme('DarkAmber')
+        config_layout = [
+                    [sg.Text('Select an available welder:',size=(30, 1),   justification='left', font = ("Helvetica", 13, "") ),],
+                    [[sg.Text('',size=(5,2)), sg.Button(welders[i])] for i in range(len(welders))],
+                    [sg.Text('', size=(1,2)), sg.CBox('Reset Window Location', key='Reset Window Location',default=False, tooltip='Use if windows launch offscreen')],
+                    [sg.Text('', size = (5,2)), sg.Submit(), sg.Text('', size=(2,1)), sg.Cancel()]]
+        window = sg.Window('Welder selection', config_layout)    
+        _event, _values = window.read(close=True)
+        reset_window = _values['Reset Window Location']
+        print(f'w {reset_window}, e {_event}')
+        if event == sg.WIN_CLOSED   : os._exit(0)
+        if event == 'Cancel'        : os._exit(0)
+        if event == 'Submit'        : return reset_window, welders[0]  #FIRST AVAILABLE WELDER
+        else                        : return reset_window, _event      #RETURN SELECTED WELDER
 
-def cam_setup(settings, cam, welder):
-    print('No settings found, starting from scratch...')
+def startup():#CHECKS CONNECTED CAMERAS, LOADS OR GENERATES SETTINGS    
+    welders = {'Percussion Welder #1':'20227035','Percussion Welder #2':'20348005','Percussion Welder #3':'20347994'}    
+    parameters = {'FPS':15,'Exposure':12000,'Gain':20}#DEFAULT SETTINGS
+    cameras = []
+    reset_window = False
+    open_windows = get_window()    
+    system = PySpin.System.GetInstance()
+    camera_list = system.GetCameras()
+    DEBUG = True
+    for i in range(camera_list.GetSize()):
+         camera_list.GetByIndex(i).Init()
+         cameras.append(PySpin.CStringPtr(camera_list.GetByIndex(i).GetNodeMap().GetNode('DeviceID')).GetValue())
+         camera_list.GetByIndex(i).DeInit
+
+    active_welders    = [k for k, v in welders.items() if k in open_windows]
+    available_welders = [k for k, v in welders.items() if v in cameras and k not in open_windows]
+    #available_welders = welders
+    #available_welders = ['Percussion Welder 1', 'Percussion Welder 2', 'Percussion Welder 3']
+    #print(f'w {welders}, wi {welders.keys[0]}')
+
+    selected_welder = welder_selector(cameras, list(available_welders))
+    print(f'{selected_welder}')
     
+    # if len(cameras) == 0 and not DEBUG:#NO CAMERAS DETECTED, RETURN ERROR
+    #     return
+                 
+
+    # if len(cameras) ==0 and DEBUG:
+    #     selected_welder = 'Percussion Welder #2'
+
+    # if len(cameras) >= 1 and len(available_welders) == 0:#ALL CAMERAS IN USE, RETURN ERROR
+    #     sg.popup_timed('\n\n\nAll connected cameras are already in use\n\nPlease close a window before relaunching Autowelder\n\n',auto_close_duration=4)
+    #     os._exit(0)
+    
+    # if len(cameras) == 1 and len(available_welders) == 1:
+    #     #sg.popup_timed('\n\nOne camera detected\nLaunching {}\n\n'.format(available_welders[0]),auto_close_duration=2)
+    #     _, values = sg.Window('Autowelder',[[sg.Text('\nOne camera detected\nLaunching {}'.format(available_welders[0]),s=(35,3))],[sg.CBox('\nReset Window Location\n',key='RESET LOCATION',default=False,tooltip='Use if windows launch offscreen')],[sg.OK(s=10)]]).read(close=True,timeout=4000)
+    #     reset_location = values['RESET LOCATION']
+    #     selected_welder = available_welders[0]
+
+    # #MULTIPLE CAMERAS CONNECTED                       
+    # if len(cameras) >= 2:
+
+    #     #AUTOMATICALLY SELECT CAMERA IF ONLY 1
+    #     if len(available_welders) == 1:
+    #         _, values = sg.Window('Autowelder',[[sg.Text('\nOne or more welders already running\nLaunching available {}'.format(available_welders[0]),s=(35,3))],[sg.CBox('\nReset Window Location\n',key='RESET LOCATION',default=False,tooltip='Use if windows launch offscreen')],[sg.OK(s=10)]]).read(close=True,timeout=4000)
+    #         reset_location = values['RESET LOCATION']
+    #         selected_welder = available_welders[0]
+
+    #     #PROMPT SELECTION IF MULTIPLE CAMERAS            
+    #     elif len(available_welders) >= 2:
+    #         config_layout = [
+    #             [sg.Text('Choose a welder:',size=(30, 1),   justification='left'), ],
+    #             [sg.Text('',size=(2,3)),sg.Listbox(values=available_welders,size=(25, 4), key='WELDER ID'),sg.Text('',size=(2,6))],
+    #             [sg.CBox('Reset Window Location',key='RESET LOCATION',default=False, tooltip='Use if windows launch offscreen')],
+    #             [sg.Submit(), sg.Cancel()]]
+    #         window = sg.Window('Welder selection', config_layout)    
+    #         event, values = window.read(close=True)
+    #         if event == sg.WIN_CLOSED   : os._exit(0)
+    #         if event == 'Cancel'        : os._exit(0)
+    #         if values['WELDER ID'] == []: values['WELDER ID'] = available_welders[0]#EMPTY SUBMIT SELECTS FIRST WELDER
+    #         reset_location = values['RESET LOCATION']
+    #         selected_welder = values['WELDER ID'][0]
+    #print(f'Window: {reset_window}')
+
+    selected_camera = welders[selected_welder]
+    save_file = '{}Psave.txt'.format(selected_welder)
+    
+    #LOAD OR PROMPT SETTINGS FOR SELECTED CAMERA
+    if os.path.isfile(save_file):
+        parameters = pickle.load(open(save_file,'rb'))
+    else                        :
+        v = camera_setup(parameters, selected_welder)
+        parameters.update(v)
+    
+    if reset_window: parameters.update({'Window Location':(0,0)})
+    parameters.update({'CAM ID':selected_camera, 'Welder ID':selected_welder})
+    camera_list.Clear()
+    return parameters
+
+def camera_setup(params, welder):#SET UP CAMERA ROTATION, FPS, EXPOSURE, GAIN
+    print('No settings found, starting from scratch...')
     config_layout = [
-        [sg.Text('Choose settings for {0}:'.format(welder),    justification='left'),],
+        [sg.Text('Save file not found\nChoose settings for {}:'.format(welder),justification='left'),],
         [sg.Frame('Camera Settings',[
-        [sg.CBox('Rotate Image',key='ROTATE',default=False,)],
-        [sg.Text('FPS',size=(9,1)),sg.InputText(settings['FPS'],size=(9,1),key='FPS')],
-        [sg.Text('Exposure',size=(9,1)),sg.InputText(settings['Exposure'],size=(9,1),key='Exposure')],
-        [sg.Text('Gain',size=(9,1)),sg.InputText(settings['Gain'],size=(9,1),key='Gain')]])],
+        [sg.Text('FPS',size=(25,1)),     sg.InputText(params['FPS'],size=(9,1),     key='FPS')],
+        [sg.Text('Exposure',size=(25,1)),sg.InputText(params['Exposure'],size=(9,1),key='Exposure')],
+        [sg.Text('Gain',size=(25,1)),    sg.InputText(params['Gain'],size=(9,1),    key='Gain')],
+        [sg.CBox('Reset Window Location', key='Reset Window Location',default=False, tooltip='Use if windows launch offscreen')],
+        ])],
         [sg.Submit(), sg.Cancel()]]
-    e, v = sg.Window('Window Title', config_layout).read(close=True)    
-    #e, v = window.read()
-    if e == sg.WIN_CLOSED: os._exit(0)
-    if e == 'Cancel': os._exit(0)
-    v.update({'CAM ID':cam})    
-    return v
+    _event, _values = sg.Window('Camera Setup', config_layout).read(close=True)
+    if _values['Reset Window Location']: _values.update({'Window Location':(0,0)})
+    if _event == sg.WIN_CLOSED : os._exit(0)
+    if _event == 'Cancel'      : os._exit(0)
+    return _values
     
 def main():
     loop = True
+    #SETS UP CAMERA EXPOSURE, GAIN, FPS
     settings = startup()
-    #print(settings)
-    win = Instance(settings)
+    #CREATES APPLICATION GUI WINDOW INSTANCE
+    win = WelderInstance(settings)
+    #INITIALIZE SELECTED CAMERA WITH SETTINGS
     win.cam = Camera(settings['CAM ID'],int(settings['Gain']),int(settings['Exposure']),int(settings['FPS']))
-        
+
+    #MAIN LOOP, GRABS AND PROCESSES CAMERA IMAGES, RESPONDS TO USER INPUTS
     while loop:
         loop = win.loop()        
 
 if __name__ == '__main__':
-    import cProfile, pstats
     profiler = cProfile.Profile()
     profiler.enable()
     main()
     profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats('tottime')
-    #stats.print_stats()
+    stats = pstats.Stats(profiler).sort_stats('ncalls')
+    stats.print_stats()
